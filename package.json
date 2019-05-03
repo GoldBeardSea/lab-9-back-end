@@ -1,7 +1,7 @@
 {
-  "name": "lab8-backend",
+  "name": "lab-9-back-end",
   "version": "1.0.0",
-  "description": "**Author**:  **Version**: 1.0.0 (increment the patch/fix version number if you make more commits past your first submission)",
+  "description": "**Author**: Tim Busch  **Version**: 1.9.9 (increment the patch/fix version number if you make more commits past your first submission)",
   "main": "server.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
@@ -9,20 +9,16 @@
   },
   "repository": {
     "type": "git",
-    "url": ""
+    "url": "git+https://github.com/GoldBeardSea/lab-9-back-end.git"
   },
   "author": "",
   "license": "ISC",
   "bugs": {
-    "url": ""
+    "url": "https://github.com/GoldBeardSea/lab-9-back-end/issues"
   },
-  "homepage": "",
+  "homepage": "https://github.com/GoldBeardSea/lab-9-back-end#readme",
   "dependencies": {
-    "@types/pg": "^7.4.14",
-    "cors": "^2.8.5",
-    "dotenv": "^7.0.0",
-    "express": "^4.16.4",
-    "pg": "^7.10.0",
-    "superagent": "^5.0.5"
+    "dotenv": "^8.0.0",
+    "express": "^4.16.4"
   }
 }
