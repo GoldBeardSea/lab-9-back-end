@@ -18,7 +18,9 @@
   },
   "homepage": "https://github.com/GoldBeardSea/lab-9-back-end#readme",
   "dependencies": {
+    "cors": "^2.8.5",
     "dotenv": "^8.0.0",
-    "express": "^4.16.4"
+    "express": "^4.16.4",
+    "superagent": "^5.0.5"
   }
 }
