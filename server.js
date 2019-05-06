@@ -37,11 +37,22 @@ function Event(data){
   this.event_date = data.start.local;
   this.summary = data.summary;
 }
-//API routes------------------------------------------------------------>
+
+function Movie(data){
+  this.title = data.title;
+  this.overview = data.overview;
+  this.average_votes = data.vote_average;
+  this.total_votes = data.vote_count;
+  this.image_url = 'https://image.tmdb.org/t/p/w200' + data.poster_path;
+  this.popularity = data.popularity;
+  this.released_on = data.release_date;
+}
+
+
+
 app.get('/', (request, response) => response.send('server works'));
 app.get('/location', getLocation);
 
-//helper functions-------------------------------------------------------->
 function handleError(error) {
   return { 'status': 500, 'responseText': 'Sorry, something went wrong' };
 }
@@ -52,21 +63,20 @@ function getLocation(request, response){
 }
 
 function queryLocationDB(queryData, response){
-  let sqlStatement = 'SELECT * FROM geoloc WHERE search_query = $1;';
+  let sqlStatement = `SELECT * FROM locations WHERE search_query = $1;`;
   let values = [queryData];
   return client.query(sqlStatement, values)
     .then( data => {
       if(data.rowCount > 0) {
         response.send(data.rows[0]);
       } else {
-        console.log('retrieving data and saving to database');
         let geocodeURL = `https://maps.googleapis.com/maps/api/geocode/json?address=${queryData}&key=${process.env.GEOCODE_API_KEY}`;
         return superagent.get(geocodeURL)
           .then( res => {
             let location = new Location(queryData, res.body);
-            let insertStatement = 'INSERT INTO geoloc ( search_query, formatted_query, latitude, longitude) VALUES ( $1, $2, $3, $4);';
-            let insertValues = [location.search_query, location.formatted_query, location.latitude, location.longitude];
-            client.query(insertStatement, insertValues);
+            let locationInsert = `INSERT INTO locations ( search_query, formatted_query, latitude, longitude) VALUES ( $1, $2, $3, $4);`;
+            let values = [location.search_query, location.formatted_query, location.latitude, location.longitude];
+            client.query(locationInsert, values);
             response.send(location);
           })
           .catch(error => handleError(error));
@@ -75,43 +85,100 @@ function queryLocationDB(queryData, response){
     .catch(error => handleError(error));
 }
 
-function queryDB(queryData, tableName, response){
-  let sqlStatement = `SELECT * FROM ${tableName} WHERE forecast = $1;`;
-  let values = [queryData];
-  console.log('queryDB being executed');
-  return client.query(sqlStatement, values)
-    .then( data => {
-      if(data.rowCount > 0) {
-        response.send(data.rows[0]);
+function lookupFunction(locationData, table, apiCall) {
+  try {
+    let sqlStatement = `SELECT * FROM ${table} WHERE location_id = $1;`;
+    let values = [locationData.id];
+    return client.query(sqlStatement, values).then(data => {
+      if (data.rowCount > 0) {
+        if ( (Date.now() - data.rows[0].time_created)  > 15 * 1000){
+          return deleteThis(table, locationData.id).then(() => apiCall(locationData));
+        }else {
+          return data.rows;
+        }
+      } else {
+        return apiCall(locationData);
       }
-    })
-    .catch(error => handleError(error));
+    });
+  } catch (error) {
+    response.status(500).send(handleError());
+  }
 }
+
+function deleteThis (table, locationId){
+  let deleteRow = `DELETE FROM ${table} WHERE location_id = ${locationId};`;
+  return client.query(deleteRow);
+}
+
 app.get('/weather', (request, response) => {
-  console.log(request.query.data);
-  // queryDB(request.query.data, 'forecast', response);
-  let weatherURL = `https://api.darksky.net/forecast/${process.env.WEATHER_API_KEY}/${request.query.data.latitude},${request.query.data.longitude}`;
-  superagent.get(weatherURL)
-    .then( res => {
-      let daily = Object.entries(res.body)[6];
-      let dailyData = daily[1].data;//hourly day forecast
-      let myForecast = dailyData.map( element => {
-        let date = new Date(element.time * 1000).toDateString();
-        let temp = new Forecast(element.summary, date);
-        return temp;
+  try {
+    lookupFunction(request.query.data, 'weather', weatherApiCall)
+      .then ( weatherData => {
+        response.status(200).send(weatherData);
       });
-      console.log('inserting into database');
-      // let insertStatement = 'INSERT INTO forecast ( forecast, time) VALUES ( $1, $2);';
-      // let insertValues = [myForecast.date.forecast, myForecast.temp.time];
-      // client.query(insertStatement, insertValues);
-      response.send(myForecast);
-    })
-    .catch(error => handleError(error));
+  } catch (error) {
+    console.log('Whoops');
+    response.status(500).send(handleError());
+  }
 });
+
+function weatherApiCall(locationData) {
+  try {
+    let weatherURL = `https://api.darksky.net/forecast/${process.env.WEATHER_API_KEY}/${request.query.data.latitude},${request.query.data.longitude}`;
+    return superagent.get(weatherURL).then((weatherApiResponse) => {
+      let weatherParsing = weatherApiResponse.body.daily.data.map(weatherResponseData => {
+        return new Weather(weatherResponseData.summary, weatherResponseData.time);
+      });
+      weatherParsing.forEach(weatherEvent => {
+        let weatherInsert = 'INSERT INTO weather (location_id, time_created, forecast, weather_time) VALUES ($1, $2, $3, $4);';
+        let values = [locationData.id, Date.now(), weatherEvent.forecast, weatherEvent.time];
+        client.query(weatherInsert, values);
+      });
+      return weatherParsing;
+    });
+  } catch(error){
+    console.log(error);
+    response.status(500).send(handleError());
+  }
+}
+
+app.get('/movies', (request, response) => {
+  try {
+    lookupFunction(request.query.data, 'movies', movieApiCall)
+      .then( filmData => {
+        return response.status(200).send(filmData);
+      });
+  } catch (error) {
+    console.log(error);
+    response.status(500).send('There was an error on our end, sorry.');
+  }
+});
+
+function movieApiCall (locationData) {
+  try{
+    let tmdbQuery = `https://api.themoviedb.org/3/search/movie?api_key=${process.env.MOVIE_API_KEY}&language=en-US&query=${locationData.search_query}&page=1&include_adult=false`;
+    return superagent
+      .get(tmdbQuery)
+      .then( (movieApiResponse) => {
+        let responseParsing = movieApiResponse.body.results.map( result => {
+          return new Movie(result);
+        });
+        responseParsing.forEach( movie => {
+          let insertMovies = 'INSERT INTO movies (location_id, created_at,movie_title, overview, avg_votes, total_votes, image_url, popularity, release_date) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);';
+          let values = [locationData.id, Date.now(), movie.title, movie.overview, movie.average_votes, movie.total_votes, movie.image_url, movie.popularity, movie.release_date];
+          client.query(insertMovies, values);
+        });
+        return responseParsing;
+      });
+  } catch(error){
+    console.log('Error: ', error);
+    response.status(500).send(handleError());
+  }
+}
 
 app.get('/events', (request, response) => {
   try {
-    let eventbriteURL = `https://www.eventbriteapi.com/v3/events/search?location.longitude=${request.query.data.longitude}&location.latitude=${request.query.data.latitude}&expand=venue`;
+    let eventbriteURL = `https://www.eventbriteapi.com/v3/events/search?location.longitude=${request.query.filmData.longitude}&location.latitude=${request.query.data.latitude}&expand=venue`;
     superagent.get(eventbriteURL)
       .set('Authorization', `Bearer ${process.env.PERSONAL_TOKEN}`)
       .then( result => {
@@ -122,7 +189,7 @@ app.get('/events', (request, response) => {
         response.send(eventSummaries);
       });
   } catch (error) {
-    response.send(handleError);
+    response.send(handleError());
   }
 });
 
