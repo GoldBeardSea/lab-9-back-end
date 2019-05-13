@@ -11,14 +11,12 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
-// app.use(express.static('./public'));
+app.use(express.static('./public'));
 
-//database setup
 const client = new pg.Client(process.env.DATABASE_URL);
 client.connect();
 
 
-//constructor functions-------------------------------------------------------->
 function Location(query, res) {
   this.search_query = query;
   this.formatted_query = res.results[0].formatted_address;
@@ -26,7 +24,7 @@ function Location(query, res) {
   this.longitude = res.results[0].geometry.location.lng;
 }
 
-function Forecast(forecast, time) {
+function Weather(forecast, time) {
   this.forecast = forecast;
   this.time = time;
 }
@@ -85,7 +83,7 @@ function queryLocationDB(queryData, response){
     .catch(error => handleError(error));
 }
 
-function lookupFunction(locationData, table, apiCall) {
+function sqlQueryHandler(locationData, table, apiCall) {
   try {
     let sqlStatement = `SELECT * FROM ${table} WHERE location_id = $1;`;
     let values = [locationData.id];
@@ -112,12 +110,12 @@ function deleteThis (table, locationId){
 
 app.get('/weather', (request, response) => {
   try {
-    lookupFunction(request.query.data, 'weather', weatherApiCall)
+    sqlQueryHandler(request.query.data, 'weather', weatherApiCall)
       .then ( weatherData => {
         response.status(200).send(weatherData);
       });
   } catch (error) {
-    console.log('Whoops');
+    console.log('Whoops 118');
     response.status(500).send(handleError());
   }
 });
@@ -130,7 +128,7 @@ function weatherApiCall(locationData) {
         return new Weather(weatherResponseData.summary, weatherResponseData.time);
       });
       weatherParsing.forEach(weatherEvent => {
-        let weatherInsert = 'INSERT INTO weather (location_id, time_created, forecast, weather_time) VALUES ($1, $2, $3, $4);';
+        let weatherInsert = `INSERT INTO weather (location_id, time_created, forecast, weather_time) VALUES ($1, $2, $3, $4);`;
         let values = [locationData.id, Date.now(), weatherEvent.forecast, weatherEvent.time];
         client.query(weatherInsert, values);
       });
@@ -142,15 +140,51 @@ function weatherApiCall(locationData) {
   }
 }
 
+
+app.get('/events', (request, response) => {
+  try {
+    sqlQueryHandler(request.query.data, `events`, eventsApiCall)
+      .then( eventData => {
+        return response.status(200).send(eventData);
+      });
+  } catch (error) {
+    console.log('error line 151');
+    response.status(500).send(handleError());
+  }
+});
+
+function eventsApiCall (locationData) {
+  try{
+    let eventQueryUrl = `https://www.eventbriteapi.com/v3/events/search?location.longitude=${locationData.longitude}&location.latitude=${locationData.latitude}`;
+    return superagent
+      .get(eventQueryUrl)
+      .then( (eventsData) => {
+        let responseParsing = eventsData.body.results.map( result => {
+          return new Event(result);
+        });
+        responseParsing.forEach( event => {
+          let insertEvents = `INSERT INTO events (location_id, created_at, link, event_name, event_date, summary) VALUES ( $1, $2, $3, $4, $5, $6);`;
+          let values = [locationData.id, Date.now(), event.link, event.name, event.event_date, event.summary];
+          client.query(insertEvents, values);
+        });
+        return responseParsing;
+      });
+  } catch(error){
+    console.log('Broke at line 173');
+    response.status(500).send(handleError());
+  }
+}
+
+
 app.get('/movies', (request, response) => {
   try {
-    lookupFunction(request.query.data, 'movies', movieApiCall)
+    sqlQueryHandler(request.query.data, `movies`, movieApiCall)
       .then( filmData => {
         return response.status(200).send(filmData);
       });
   } catch (error) {
-    console.log(error);
-    response.status(500).send('There was an error on our end, sorry.');
+    console.log('error line 152');
+    response.status(500).send(handleError());
   }
 });
 
@@ -164,34 +198,18 @@ function movieApiCall (locationData) {
           return new Movie(result);
         });
         responseParsing.forEach( movie => {
-          let insertMovies = 'INSERT INTO movies (location_id, created_at,movie_title, overview, avg_votes, total_votes, image_url, popularity, release_date) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);';
+          let insertMovies = `INSERT INTO movies (location_id, created_at,movie_title, overview, avg_votes, total_votes, image_url, popularity, release_date) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);`;
           let values = [locationData.id, Date.now(), movie.title, movie.overview, movie.average_votes, movie.total_votes, movie.image_url, movie.popularity, movie.release_date];
           client.query(insertMovies, values);
         });
         return responseParsing;
       });
   } catch(error){
-    console.log('Error: ', error);
+    console.log('error at line 208');
     response.status(500).send(handleError());
   }
 }
 
-app.get('/events', (request, response) => {
-  try {
-    let eventbriteURL = `https://www.eventbriteapi.com/v3/events/search?location.longitude=${request.query.filmData.longitude}&location.latitude=${request.query.data.latitude}&expand=venue`;
-    superagent.get(eventbriteURL)
-      .set('Authorization', `Bearer ${process.env.PERSONAL_TOKEN}`)
-      .then( result => {
-        const eventSummaries = result.body.events.map(item => {
-          const summary = new Event(item);
-        return summary;
-        });
-        response.send(eventSummaries);
-      });
-  } catch (error) {
-    response.send(handleError());
-  }
-});
 
-app.use('*', (request, response) => response.send('Sorry, that route does not exist.'));
+app.use('*', (request, response) => response.send('Oops'));
 app.listen(PORT, () => console.log(`Listening on port ${PORT}`));
